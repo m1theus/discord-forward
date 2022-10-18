@@ -1,42 +1,70 @@
-const dotenv = require('dotenv');
-dotenv.config();
-const _ = require('lodash');
-const dayjs = require('dayjs')
-const DiscordClient = require('./discord')
+require('dotenv').config();
+const qrTerminal = require('qrcode-terminal');
+const { Client: WppClient, MessageMedia } = require('whatsapp-web.js');
+const { Client: DiscordClient, GatewayIntentBits, ClientEvents } = require('discord.js');
 
-dayjs.locale('en')
-
-const { CHANNEL_FROM, CHANNEL_TO, CLIENT_PUBLIC_KEY } = process.env
-
-const client = new DiscordClient(CLIENT_PUBLIC_KEY);
-
-const PROCESSED_ID = [];
+const { DISCORD_BOT_TOKEN } = process.env;
 
 (async () => {
-  async function forwardMessage(messages) {
-    const processed = [];
-    for (const msg of messages) {
-      const hasMessage = _.find(PROCESSED_ID, (id) => id === msg.id);
+  const chatMap = {
+    '1031705361255780462': '120363046356549893@g.us',
+    '1031716951279546411': '120363045904090312@g.us'
+  }
+  const discordClient = new DiscordClient({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ]
+  });
+  const wppClient = new WppClient();
 
-      try {
-        if (!hasMessage) {
-          await client.sendMessage(CHANNEL_TO, msg);
-          processed.push(msg)
-          console.log('success_send_message =>', msg.id);
+  wppClient.on('qr', (qr) => {
+    qrTerminal.generate(qr, { small: true })
+  });
+
+  wppClient.on('ready', () => {
+    console.log('Client is ready!');
+  });
+
+  discordClient.on('ready', () => {
+    console.log(`Logged in as ${discordClient.user.tag}!`);
+  });
+
+  discordClient.on('messageCreate', async ({ channelId, content, attachments = new Map() }) => {
+    const wppState = await wppClient.getState();
+    console.log(`WPP_STATE=${wppState},channelId=${channelId},text=${content},attach=`, attachments);
+    if (!(wppState === 'CONNECTED')) {
+      return;
+    }
+
+    const medias = [];
+
+    const chatId = chatMap[channelId];
+    console.log('found_chat_id=', chatId)
+    if (chatId) {
+      if (attachments && attachments.size > 0) {
+        console.log('message_has_attachments', attachments.size)
+        for (const [, value] of attachments.entries()) {
+          const { proxyURL } = value;
+          const media = await MessageMedia.fromUrl(proxyURL);
+          medias.push(media);
         }
-      } catch (error) {
-        console.log('failed to send message', error)
+
+        console.log('medias_size=', medias.length)
+
+        for (const media of medias) {
+          console.log('sending_media_message')
+          await wppClient.sendMessage(chatId, media, {
+            caption: content,
+          });
+        }
+      } else {
+        console.log('sending_text_message')
+        await wppClient.sendMessage(chatId, content);
       }
     }
-    return processed;
-  }
-
-  const pooling = async function () {
-    const messages = await client.getMessages(CHANNEL_FROM, 20);
-    console.log(messages)
-    await forwardMessage(messages);
-  }
-
-  await pooling();
-  setInterval(pooling, 1000);
+  })
+  wppClient.initialize();
+  discordClient.login(DISCORD_BOT_TOKEN);
 })();
