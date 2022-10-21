@@ -1,8 +1,10 @@
 const qrTerminal = require('qrcode-terminal');
-const { Client, MessageMedia } = require('whatsapp-web.js');
+const { Client, MessageMedia, LocalAuth } = require('whatsapp-web.js');
 
 module.exports = async function start(eventEmitter) {
-  const client = new Client();
+  const client = new Client({
+    authStrategy: new LocalAuth(),
+  });
 
   async function startEventHandle() {
     eventEmitter.on('MESSAGE_CREATE', async ({
